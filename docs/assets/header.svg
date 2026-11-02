@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="260" viewBox="0 0 1200 260" role="img" aria-labelledby="title desc">
+  <!-- Repository artwork is vector-based and contains no runtime identities or measurements. -->
+  <title id="title">Node-Sight</title>
+  <desc id="desc">A lightweight native Windows widget for local and remote Linux telemetry.</desc>
+  <rect width="1200" height="260" rx="16" fill="#080c0b"/>
+  <rect x="24" y="24" width="1152" height="212" rx="8" fill="none" stroke="#2c3d30"/>
+  <path d="M64 170h100l18-30 20 46 26-80 24 64h80M868 170h70l16-30 20 46 26-80 24 64h112" fill="none" stroke="#97c579" stroke-width="2" opacity=".65"/>
+  <g font-family="Consolas,Menlo,monospace" text-anchor="middle">
+    <text x="600" y="73" font-size="13" letter-spacing="4" fill="#97c579">NATIVE DESKTOP TELEMETRY</text>
+    <text x="600" y="138" font-size="60" font-weight="700" letter-spacing="-2" fill="#e0e6da">Node-Sight</text>
+    <text x="600" y="179" font-size="17" fill="#9ba492">Windows on your desk. Linux over SSH.</text>
+    <text x="600" y="213" font-size="12" letter-spacing="2" fill="#788172">C++17 / WIN32 / GDI / OPENSSH</text>
+  </g>
+</svg>

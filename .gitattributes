@@ -1,0 +1,5 @@
+# Preserve portable shell/resource inputs and consistent source formatting on Windows.
+* text=auto eol=lf
+*.png -text
+*.ico -text
+*.zip -text

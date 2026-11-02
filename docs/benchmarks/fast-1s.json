@@ -1,0 +1,34 @@
+{
+  "Scenario": "fast-1s-local-panel-125-percent",
+  "CapturedAtUtc": "2026-11-02T03:52:47Z",
+  "MeasuredSeconds": 60.921,
+  "SampleCount": 60,
+  "LogicalProcessors": 16,
+  "SSHProcessCount": 1,
+  "Processes": [
+    {
+      "Process": "NodeSight",
+      "AverageWorkingSetMiB": 15.59,
+      "PeakWorkingSetMiB": 15.602,
+      "AveragePrivateMiB": 2.352,
+      "CPUPercentTotalMachine": 0.04328
+    },
+    {
+      "Process": "ssh",
+      "AverageWorkingSetMiB": 11.484,
+      "PeakWorkingSetMiB": 11.496,
+      "AveragePrivateMiB": 2.947,
+      "CPUPercentTotalMachine": 0.00321
+    }
+  ],
+  "CombinedAverageWorkingSetMiB": 27.074,
+  "CombinedAveragePrivateMiB": 5.299,
+  "CombinedCPUPercentTotalMachine": 0.04649,
+  "Preferences": {
+    "interval": 1,
+    "size": 125,
+    "local": 1,
+    "opacity": 100,
+    "pinned": 0
+  }
+}

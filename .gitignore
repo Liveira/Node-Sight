@@ -1,0 +1,23 @@
+/build/
+/build-*/
+/dist/
+*.user
+*.log
+# Local connection settings, generated diagnostics, credentials and SSH keys.
+settings.ini
+!examples/settings.ini
+*.local.ini
+probe*.json
+*-probe.json
+window-info.json
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+known_hosts*
+*.lnk
+__pycache__/
+.vs/

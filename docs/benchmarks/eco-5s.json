@@ -1,0 +1,34 @@
+{
+  "Scenario": "eco-5s-server-only",
+  "CapturedAtUtc": "2026-11-02T03:55:45Z",
+  "MeasuredSeconds": 60.86,
+  "SampleCount": 60,
+  "LogicalProcessors": 16,
+  "SSHProcessCount": 1,
+  "Preferences": {
+    "interval": 5,
+    "opacity": 100,
+    "local": 0,
+    "pinned": 0,
+    "size": 80
+  },
+  "Processes": [
+    {
+      "Process": "NodeSight",
+      "AverageWorkingSetMiB": 15.596,
+      "PeakWorkingSetMiB": 15.605,
+      "AveragePrivateMiB": 2.446,
+      "CPUPercentTotalMachine": 0.00481
+    },
+    {
+      "Process": "ssh",
+      "AverageWorkingSetMiB": 11.496,
+      "PeakWorkingSetMiB": 11.508,
+      "AveragePrivateMiB": 2.962,
+      "CPUPercentTotalMachine": 0.0
+    }
+  ],
+  "CombinedAverageWorkingSetMiB": 27.092,
+  "CombinedAveragePrivateMiB": 5.408,
+  "CombinedCPUPercentTotalMachine": 0.00481
+}
