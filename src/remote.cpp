@@ -99,6 +99,8 @@ void RemoteCollector::start(const Config& config) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         state_ = RemoteState{};
+        samples_.clear();
+        dropped_ = 0;
     }
     thread_ = std::thread(&RemoteCollector::run, this, config);
 }
@@ -113,7 +115,7 @@ void RemoteCollector::run(Config c) {
     auto collector = script();
     if (collector.empty()) {
         std::lock_guard<std::mutex> lock(mutex_);
-        state_.message = L"Coletor Linux ausente no executável.";
+        state_.message = L"Embedded Linux collector is missing.";
         return;
     }
     wchar_t sys[MAX_PATH]{};
@@ -121,7 +123,7 @@ void RemoteCollector::run(Config c) {
     std::wstring ssh = std::wstring(sys) + L"\\OpenSSH\\ssh.exe";
     if (GetFileAttributesW(ssh.c_str()) == INVALID_FILE_ATTRIBUTES) {
         std::lock_guard<std::mutex> lock(mutex_);
-        state_.message = L"Instale o Cliente OpenSSH do Windows.";
+        state_.message = L"Install the Windows OpenSSH Client feature.";
         return;
     }
     // Retry only after the previous attempt releases its handles.
@@ -139,7 +141,7 @@ void RemoteCollector::run(Config c) {
             if (writeIn)
                 CloseHandle(writeIn);
             std::lock_guard<std::mutex> lock(mutex_);
-            state_.message = L"Não foi possível criar o canal SSH.";
+            state_.message = L"Could not create the SSH pipes.";
             return;
         }
         SetHandleInformation(readOut, HANDLE_FLAG_INHERIT, 0);
@@ -157,7 +159,7 @@ void RemoteCollector::run(Config c) {
             CloseHandle(readIn);
             CloseHandle(writeIn);
             std::lock_guard<std::mutex> lock(mutex_);
-            state_.message = L"Não foi possível isolar o processo SSH.";
+            state_.message = L"Could not isolate the SSH process.";
             return;
         }
         // Check existence only; the helper supplies the saved secret directly to OpenSSH.
@@ -177,19 +179,38 @@ void RemoteCollector::run(Config c) {
         if (!c.key.empty())
             cmd += L" -o IdentitiesOnly=yes -i " + quote(c.key);
         cmd += L" -p " + std::to_wstring(c.port) + L" -l " + quote(c.user) + L" " + quote(c.host) +
-               L" sh -s -- " + std::to_wstring(c.interval);
+               L" sh -s -- " + utf8ToWide(intervalArgument(c.intervalMs));
         auto env = environment(c);
-        STARTUPINFOW si{sizeof(si)};
-        si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
-        si.hStdInput = readIn;
-        si.hStdOutput = writeOut;
-        si.hStdError = writeOut;
+        STARTUPINFOEXW si{};
+        si.StartupInfo.cb = sizeof(si);
+        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+        si.StartupInfo.wShowWindow = SW_HIDE;
+        si.StartupInfo.hStdInput = readIn;
+        si.StartupInfo.hStdOutput = writeOut;
+        si.StartupInfo.hStdError = writeOut;
+        // Concurrent launches must not inherit another profile's pipe writer.
+        // An unrelated inherited writer keeps ReadFile alive after its own SSH dies,
+        // causing both reconnect and shutdown joins to wait indefinitely.
+        SIZE_T attributeBytes = 0;
+        InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeBytes);
+        std::vector<unsigned char> attributes(attributeBytes);
+        si.lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributes.data());
+        const bool initialized =
+            InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &attributeBytes) != FALSE;
+        HANDLE childHandles[] = {readIn, writeOut};
+        const bool restricted =
+            initialized &&
+            UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, childHandles,
+                                      sizeof(childHandles), nullptr, nullptr) != FALSE;
         PROCESS_INFORMATION pi{};
         // Suspend until the process is assigned to our lifetime-scoped job.
-        bool created = CreateProcessW(ssh.c_str(), cmd.data(), nullptr, nullptr, TRUE,
-                                      CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
-                                      env.data(), nullptr, &si, &pi) != FALSE;
+        bool created =
+            restricted && CreateProcessW(ssh.c_str(), cmd.data(), nullptr, nullptr, TRUE,
+                                         CREATE_NO_WINDOW | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT |
+                                             EXTENDED_STARTUPINFO_PRESENT,
+                                         env.data(), nullptr, &si.StartupInfo, &pi) != FALSE;
+        if (initialized)
+            DeleteProcThreadAttributeList(si.lpAttributeList);
         CloseHandle(readIn);
         CloseHandle(writeOut);
         if (created && !AssignProcessToJobObject(job, pi.hProcess)) {
@@ -203,7 +224,7 @@ void RemoteCollector::run(Config c) {
                 std::lock_guard<std::mutex> lock(mutex_);
                 job_ = job;
                 state_.connected = false;
-                state_.message = L"Conectando via SSH...";
+                state_.message = L"Connecting via SSH...";
                 state_.metrics.reset();
             }
             if (WaitForSingleObject(stopEvent_, 0) == WAIT_OBJECT_0)
@@ -231,10 +252,16 @@ void RemoteCollector::run(Config c) {
                     RawSample sample;
                     std::lock_guard<std::mutex> lock(mutex_);
                     if (parseSample(line, monotonicSeconds(), sample)) {
+                        sample.session = state_.reconnects;
                         state_.metrics.update(sample);
+                        if (samples_.size() >= 256) {
+                            samples_.pop_front();
+                            ++dropped_;
+                        }
+                        samples_.push_back(sample);
                         state_.lastSample = sample.time;
                         state_.connected = true;
-                        state_.message = L"Conexão criptografada · SSH";
+                        state_.message = L"Encrypted SSH connection";
                     } else if (!line.empty()) {
                         state_.message = utf8ToWide(line.substr(0, 300));
                     }
@@ -257,10 +284,10 @@ void RemoteCollector::run(Config c) {
             job_ = nullptr;
             state_.connected = false;
             if (!created)
-                state_.message = L"Falha ao iniciar OpenSSH.";
-            else if (state_.message == L"Conectando via SSH..." ||
-                     state_.message == L"Conexão criptografada · SSH")
-                state_.message = L"Servidor desconectado. Nova tentativa em 5s.";
+                state_.message = L"Could not start OpenSSH.";
+            else if (state_.message == L"Connecting via SSH..." ||
+                     state_.message == L"Encrypted SSH connection")
+                state_.message = L"Disconnected. Retrying in 5 seconds.";
             ++state_.reconnects;
         }
         CloseHandle(job);
@@ -268,4 +295,15 @@ void RemoteCollector::run(Config c) {
         if (WaitForSingleObject(stopEvent_, 5000) == WAIT_OBJECT_0)
             break;
     }
+}
+
+/** Move complete samples to the UI-owned recorder without sharing mutable collector state. */
+SampleBatch RemoteCollector::takeSamples() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    SampleBatch batch;
+    batch.samples.assign(samples_.begin(), samples_.end());
+    samples_.clear();
+    batch.dropped = dropped_;
+    dropped_ = 0;
+    return batch;
 }

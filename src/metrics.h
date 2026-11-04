@@ -1,6 +1,8 @@
 // Shared counter model. All byte quantities use binary bytes; rates use bytes/second.
 #pragma once
+#ifdef _WIN32
 #include <windows.h>
+#endif
 #include <array>
 #include <cstdint>
 #include <string>
@@ -29,13 +31,15 @@ struct Series {
 
 /** Cumulative platform counters normalized into a common byte/second model. */
 struct RawSample {
-    uint64_t total = 0, idle = 0;            // CPU time units must match each other, not across hosts.
+    uint64_t session = 0;         // Client transport generation; never sent by or trusted from a remote host.
+    uint64_t total = 0, idle = 0; // CPU time units must match each other, not across hosts.
     uint64_t memTotal = 0, memAvailable = 0; // Physical bytes; available includes reclaimable cache.
-    uint64_t swapTotal = 0, swapFree = 0;    // Linux swap bytes; zero when not exposed locally.
-    uint64_t diskTotal = 0, diskUsed = 0;    // Root/system-volume capacity, not disk I/O throughput.
+    bool swapKnown = true;                // Windows local collection does not expose Linux swap accounting.
+    uint64_t swapTotal = 0, swapFree = 0; // Linux swap bytes; zero when not exposed locally.
+    uint64_t diskTotal = 0, diskUsed = 0; // Root/system-volume capacity, not disk I/O throughput.
     uint64_t rx = 0, tx = 0; // Cumulative received/transmitted bytes since interface initialization.
     double uptime = 0;       // Host boot-relative seconds, used to detect remote reboots.
-    double load = 0;         // Linux one-minute load average, not a CPU percentage.
+    double load = -1;        // Linux one-minute load average, not a CPU percentage.
     double temperature = -1; // Celsius; -1 means no readable temperature sensor.
     double time = 0;         // Client monotonic receive time for rate denominators.
 };
@@ -46,7 +50,8 @@ struct Metrics {
     bool valid = false;                // At least one validated sample is available.
     bool ratesValid = false;           // Two continuous samples are available for deltas.
     double cpu = 0, ram = 0, disk = 0; // Percentage values in the 0..100 range.
-    double rxRate = 0, txRate = 0;     // Bytes/second, independent of display units.
+    double peakCpu = 0, peakRam = 0, peakRx = 0, peakTx = 0; // Peaks across the current collector session.
+    double rxRate = 0, txRate = 0;                           // Bytes/second, independent of display units.
     Series cpuHistory, ramHistory, diskHistory, rxHistory, txHistory;
 
     /** Calculate interval rates and append histories; reset across counter discontinuities. */
@@ -70,3 +75,12 @@ class LocalCollector {
     /** Locate the Windows installation volume, including its trailing backslash. */
     std::wstring drive() const;
 };
+
+/** Native process counters. CPU seconds are cumulative across all threads. */
+struct ProcessCounters {
+    uint64_t residentBytes = 0;
+    double cpuSeconds = 0;
+    unsigned logicalProcessors = 1;
+};
+/** Read the current process only; platform implementations never spawn commands. */
+ProcessCounters processCounters();

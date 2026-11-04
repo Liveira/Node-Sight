@@ -1,76 +1,100 @@
-# Architecture and data contract
+# Architecture — 2.0 development
 
-## Runtime path
+## Shared model, native frontends
 
 ```mermaid
 flowchart LR
-    OS[Windows APIs] --> LC[LocalCollector]
-    LC --> LM[Metrics + fixed histories]
-    Linux[Linux /proc and thermal files] --> AWK[Read-only sh / awk collector]
-    AWK --> SSH[Persistent system OpenSSH]
-    SSH --> Worker[RemoteCollector worker]
-    Worker --> Parser[Validated RV1 parser]
-    Parser --> Snapshot[Mutex-protected metrics snapshot]
-    LM --> GDI[Win32 / GDI renderer]
-    Snapshot --> GDI
-    GDI --> Widget[Tool window + tray]
+    Win[Windows APIs] --> Local[LocalCollector]
+    Proc[Linux /proc + statvfs] --> Local
+    Local --> Hub[MonitorHub]
+    Server[Linux hosts] --> SSH[One OpenSSH process per enabled profile]
+    SSH --> Workers[Independent RemoteCollector workers]
+    Workers --> State[Validated counters + fixed histories]
+    Workers --> Queue[Bounded received-sample queues]
+    State --> Hub
+    Queue --> Hub
+    Hub --> Log[UsageRecorder + bounded .log rotation]
+    Hub --> Layout[Shared DashboardState and layout]
+    Layout --> GDI[Win32 / GDI]
+    Layout --> GTK[GTK 3 / Cairo]
 ```
 
-The UI thread owns window handles, GDI resources, local metrics and preferences. The worker owns one SSH job and publishes remote state under its mutex. `snapshot()` copies that state under one lock and releases it before painting. SSH reads can block without blocking the message loop. Reconnection uses an interruptible event wait rather than a polling spin.
+The UI thread owns preferences, local metrics, the hub and the recorder. Each enabled remote profile owns an independent worker, cancellation mechanism and SSH process lifetime. Workers parse into protected state and append received samples to a bounded handoff; they never touch native widgets or log streams.
 
-## Source map
+`snapshot()` copies state under a short collector mutex. Drawing and file I/O occur after that lock is released. `takeSamples()` drains at most 256 raw frames per profile. The hub feeds every drained frame into recording math, so a 100 ms peak is not intentionally replaced by only the final value at a one-second summary boundary. Queue overflow is counted and logged explicitly.
 
-| File | Responsibility |
+## Profiles and reconfiguration
+
+`ServerProfile` separates identity, monitoring enablement, visibility and collapsed presentation. The maximum is 32 profiles. Native settings operate on a draft; successful Apply persists it atomically and reconfigures the hub.
+
+Unchanged host/user/port/key/interval combinations keep their existing transport and counters. Appearance, aliases and visibility do not force reconnects. Removed/disabled/changed profiles close their old transport and recording state. A hidden but enabled profile still receives samples and log records. Disabling the local-computer option stops that local collector; collapsing its card only affects presentation.
+
+The hub updates process cost once per second, even at 100 ms collection. UI timers continue while a tray-hidden widget has no repaint work. Native windows use the same geometry for card drawing, collapse hit tests and scroll bounds.
+
+## Module map
+
+| Module | Responsibility |
 | --- | --- |
-| `src/main.cpp` | Native event loop, drawing primitives, terminal panels, menu, settings, diagnostics and anonymous demo renderer |
-| `src/config.*` | Per-user INI persistence, safe defaults, validation and text conversion |
-| `src/metrics.*` | Cumulative samples, delta math, fixed ring buffers and read-only Windows adapter |
-| `src/remote.*` | OpenSSH child environment, pipes, lifetime job, parser and reconnect loop |
-| `src/askpass.cpp` | Single-request credential-to-pipe helper with buffer scrubbing |
-| `src/app.rc` / `app.manifest` | Embedded collector, product metadata, DPI awareness and current-user privileges |
-| `collectors/linux.sh` | No-install, read-only POSIX collector |
-| `tests/metrics_test.cpp` | Deterministic metric/protocol regressions and native collector smoke test |
-| `tools/measure.ps1` | Read-only client performance accounting |
+| `config.*` | Portable UTF-8 INI schema, v1 migration, bounds, isolated config paths and atomic writes |
+| `metrics.*` | Unit-normalized counters, interval math, observed peaks and fixed histories |
+| `local_win.cpp` / `local_linux.cpp` | Read-only native OS and current-process counters |
+| `remote.cpp` / `remote_linux.cpp` | Persistent SSH transports, scoped process lifetime, bounded parsing and queues |
+| `monitor.*` | Fleet orchestration, selective reconfiguration, local sampling and recorder handoff |
+| `recording.*` | Duration/continuous sessions, per-window/session peaks, events and rotation |
+| `dashboard.*` | Platform-neutral layout and drawing commands |
+| `main.cpp` / `settings_win.*` | Win32 widget, dark sectioned settings, diagnostics and native exports |
+| `main_linux.cpp` | GTK/Cairo widget, notebook settings, tray hints and headless diagnostics |
+| `askpass.cpp` | Windows-only Credential Manager to OpenSSH pipe helper |
 
-Functions, structures, units, ownership and non-obvious control paths are documented in English in the source. The existing interactive labels are primarily Portuguese; terminal metric abbreviations are shared across languages.
+## RV1 protocol
 
-## RV1 line format
-
-One ASCII line per sample, terminated by LF:
+The same script is embedded as a Windows resource and configured into a Linux C++ header. It is streamed to `sh -s -- INTERVAL`; no loose collector file is installed on a target.
 
 ```text
 RV1 total idle memTotal memAvailable swapTotal swapFree diskTotal diskUsed rx tx uptime load temperature
 ```
 
-| Field | Wire unit / meaning |
+| Fields | Wire representation |
 | --- | --- |
-| `total`, `idle` | Cumulative Linux CPU ticks, excluding duplicated guest time; idle includes iowait |
-| `memTotal`, `memAvailable`, `swapTotal`, `swapFree` | KiB from `/proc/meminfo` |
-| `diskTotal`, `diskUsed` | KiB for `/` from `df -Pk` |
-| `rx`, `tx` | Cumulative interface bytes |
+| `total`, `idle` | Cumulative Linux CPU ticks; guest time is not double-counted and iowait is idle |
+| RAM/swap fields | KiB from `/proc/meminfo` |
+| Disk fields | KiB for `/` from `df -Pk`, cached for roughly 30 seconds |
+| `rx`, `tx` | Cumulative bytes for the default-route interface, with a non-loopback fallback |
 | `uptime` | Boot-relative seconds |
-| `load` | One-minute load average |
-| `temperature` | Celsius, or `-1` when no readable zone exists |
+| `load` | One-minute Linux load average |
+| `temperature` | Celsius or `-1` for unavailable |
 
-The receiver enforces a frame-size bound, field count, nonnegative counters, finite floating-point values, coherent totals and KiB multiplication bounds. It parses into temporary state and publishes only complete valid samples. Diagnostics and incomplete input have separate size limits.
+Only 0.1, 0.25, 0.5, 1, 2, 5 and 10-second sleep values are accepted. The receiver validates length, exact field count, nonnegative counters, finite floating values, coherent totals and multiplication bounds before converting KiB to bytes. Invalid input never partly overwrites the previous valid sample. Diagnostics and incomplete input have bounded buffers too.
 
-## Derived values
+## Derived values and histories
 
 ```text
 CPU % = 100 × (1 − Δidle / Δtotal)
 RAM % = 100 × (total − available) / total
-Disk % = 100 × used / total
-RX/TX bytes/s = Δcounter / client monotonic elapsed seconds
+Disk % = 100 × occupied / total
+RX/TX bytes/s = Δcounter / monotonic client receive interval
 ```
 
-Each host has 120-point fixed histories for CPU, RAM, disk, RX and TX. Their capacity spans `120 × interval` seconds. The first sample cannot provide CPU/network deltas; empty history is not filled with invented zeros. Reconnects, reboots, rollback or an invalid time interval reset the timeline. NIC byte rollback yields zero for that direction rather than unsigned underflow.
+Five histories of 120 floats per host bound the chart data. CPU/network rates need two continuous samples. Reconnect/reboot/rollback or an invalid receive interval clears the timeline; NIC counter rollback cannot underflow into a fabricated spike. Local Windows swap/load fields are explicitly unavailable instead of being substituted with Linux semantics.
 
-## Process and resource lifetime
+Renderer columns retain maxima when multiple stored samples map to one narrow column, so downsampling does not deliberately hide a short stored peak. The 120-point history capacity is independent of sampling cadence; a 100 ms configuration spans twelve seconds.
 
-The SSH process starts suspended, is assigned to a kill-on-close job, and only then resumes. Parent-only pipe ends are marked non-inheritable. Closing the app signals cancellation, terminates only its own job and joins the worker before destruction. The GDI backbuffer changes only when dimensions change; pens, brushes, bitmaps, fonts and menus have matching cleanup paths.
+## Native resource and process lifetime
 
-The script is embedded as a resource, normalized to LF and streamed to `sh -s` over SSH stdin. It does not create server files, use sudo, install an agent or launch a daemon. Default-route interface selection reduces virtual-bridge double-counting; without a route it falls back to non-loopback counters.
+Windows creates SSH suspended, assigns a kill-on-close job, then resumes it. **A `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` allowlist restricts inheritance to that profile's own stdin/stdout handles.** Without the allowlist, concurrent launches can inherit another profile's pipe writer and prevent EOF during shutdown/reconnect. Canceling stops only the owning job, joins the worker and closes its resources.
 
-## Diagnostic exports
+Linux uses close-on-exec pipes and `posix_spawnp` with a separate process group. The worker polls output with cancellation checks. Shutdown sends TERM, waits briefly, then uses KILL only for its own remaining group if necessary. SIGINT/TERM trigger normal application shutdown. Forced OS/process termination has weaker flushing guarantees than orderly exit.
 
-`--probe` checks real collection; `--window-info` describes the real window styles; `--render-preview` exports live drawing. `--demo-preview` and `--demo-server-preview` instead override every identity and use deterministic synthetic counters without starting SSH. Demo images are layout examples, not benchmark evidence.
+GDI reuses a backbuffer and stock drawing objects. Cairo reuses one Pango layout within a frame. GTK and GDI own their respective native UI resources; neither calls a browser renderer. Linux utility/skip-taskbar/keep-above behavior is a compositor hint, especially under Wayland.
+
+## Recording boundaries
+
+The recorder is UI/hub-thread-owned, uses monotonic deadlines and writes UTC timestamps. Latest values and window/session peaks are separate. Peak times refer to receipt of the contributing frame; write times can be later. Summaries are not emitted faster than new measurements arrive. Normal flushing occurs at least once a second; forced termination can lose buffered lines.
+
+One active file plus a configurable number of size-limited archives bounds disk retention. Recording configuration changes begin a new session; ordinary appearance changes preserve it. Profile removal emits a final summary and releases its retained state. See [recording details](RECORDING.md).
+
+## Verification
+
+The common tests cover protocol math, bounded histories, schema migration, independent profiles, finite/continuous recording, peak retention and size rotation. Linux process tests use an isolated fake `ssh` in a test-only PATH to verify concurrent transports, hidden-node logs, preserved sessions and sample queues without credentials. GTK smoke tests construct actual native windows and apply the settings form under Xvfb. Windows live validation uses two real independent SSH sessions, not the fixture.
+
+Anonymous exports override identities before drawing and never launch SSH. They are separate from the real-client performance reports and private local test configurations.

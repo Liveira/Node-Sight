@@ -1,11 +1,8 @@
 // Allocation-bounded histories, platform-neutral counter math and the Windows metrics adapter.
 // All runtime settings and credentials remain outside the repository.
 
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include "metrics.h"
-#include <iphlpapi.h>
-#include <netioapi.h>
+#include <chrono>
 #include <algorithm>
 #include <cmath>
 #include <sstream>
@@ -31,7 +28,7 @@ float Series::max() const {
 }
 /** Use boot-relative monotonic time so wall-clock adjustments cannot distort network-rate denominators. */
 double monotonicSeconds() {
-    return static_cast<double>(GetTickCount64()) / 1000.0;
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 /** Discard all counters, derived values and histories when a new sampling session begins. */
 void Metrics::reset() {
@@ -41,8 +38,8 @@ void Metrics::reset() {
  * discontinuities. */
 void Metrics::update(const RawSample& s) {
     // Reboots, counter rollback or duplicate timestamps invalidate interval math.
-    bool nextRates =
-        valid && s.time > raw.time && s.uptime >= raw.uptime && s.total >= raw.total && s.idle >= raw.idle;
+    bool nextRates = valid && s.session == raw.session && s.time > raw.time && s.uptime >= raw.uptime &&
+                     s.total >= raw.total && s.idle >= raw.idle;
     previous = raw;
     raw = s;
     cpu = 0;
@@ -65,6 +62,10 @@ void Metrics::update(const RawSample& s) {
     disk = s.diskTotal ? 100.0 * static_cast<double>(std::min(s.diskUsed, s.diskTotal)) /
                              static_cast<double>(s.diskTotal)
                        : 0;
+    peakCpu = std::max(peakCpu, cpu);
+    peakRam = std::max(peakRam, ram);
+    peakRx = std::max(peakRx, rxRate);
+    peakTx = std::max(peakTx, txRate);
     ratesValid = nextRates;
     valid = true;
     // A reconnect/reboot starts a new timeline; no fabricated zero spikes.
@@ -126,66 +127,4 @@ bool parseSample(const std::string& line, double now, RawSample& out) {
     s.time = now;
     out = s;
     return true;
-}
-/** Combine the two FILETIME halves without truncating the 64-bit CPU time counters. */
-static uint64_t ft(FILETIME f) {
-    return (static_cast<uint64_t>(f.dwHighDateTime) << 32) | f.dwLowDateTime;
-}
-/** Read real Windows CPU, physical RAM, system-volume space and interface counters without WMI or
- * subprocesses. */
-bool LocalCollector::sample(RawSample& s) {
-    FILETIME idle{}, kernel{}, user{};
-    MEMORYSTATUSEX mem{sizeof(mem)};
-    if (!GetSystemTimes(&idle, &kernel, &user) || !GlobalMemoryStatusEx(&mem))
-        return false;
-    s = {};
-    s.temperature = -1;
-    s.total = ft(kernel) + ft(user);
-    s.idle = ft(idle);
-    s.memTotal = mem.ullTotalPhys;
-    s.memAvailable = mem.ullAvailPhys;
-    s.uptime = static_cast<double>(GetTickCount64()) / 1000.0;
-    s.time = monotonicSeconds();
-    ULARGE_INTEGER avail{}, total{}, free{};
-    if (GetDiskFreeSpaceExW(drive().c_str(), &avail, &total, &free)) {
-        s.diskTotal = total.QuadPart;
-        s.diskUsed = total.QuadPart - free.QuadPart;
-    }
-    // Prefer physical interfaces to avoid double-counting virtual bridge traffic.
-    MIB_IF_TABLE2* table = nullptr;
-    if (GetIfTable2(&table) == NO_ERROR) {
-        bool physical = false;
-        for (ULONG i = 0; i < table->NumEntries; ++i) {
-            const auto& r = table->Table[i];
-            if (r.OperStatus == IfOperStatusUp && r.InterfaceAndOperStatusFlags.HardwareInterface)
-                physical = true;
-        }
-        for (ULONG i = 0; i < table->NumEntries; ++i) {
-            const auto& r = table->Table[i];
-            if (r.OperStatus != IfOperStatusUp || r.Type == IF_TYPE_SOFTWARE_LOOPBACK ||
-                r.Type == IF_TYPE_TUNNEL)
-                continue;
-            if (physical && !r.InterfaceAndOperStatusFlags.HardwareInterface)
-                continue;
-            s.rx += r.InOctets;
-            s.tx += r.OutOctets;
-        }
-        // Release API-owned interface storage with its matching allocator.
-        FreeMibTable(table);
-    }
-    return true;
-}
-/** Read the Windows computer name for local display only; anonymous demo mode overrides it before export. */
-std::wstring LocalCollector::computerName() const {
-    wchar_t name[MAX_COMPUTERNAME_LENGTH + 1]{};
-    DWORD len = MAX_COMPUTERNAME_LENGTH + 1;
-    return GetComputerNameW(name, &len) ? name : L"Windows";
-}
-/** Resolve the Windows installation volume rather than assuming that the OS always lives on C:. */
-std::wstring LocalCollector::drive() const {
-    wchar_t path[MAX_PATH]{};
-    GetWindowsDirectoryW(path, MAX_PATH);
-    if (path[1] == L':')
-        return std::wstring(path, 2) + L"\\";
-    return L"C:\\";
 }

@@ -8,7 +8,7 @@
   <g font-family="Consolas,Menlo,monospace" text-anchor="middle">
     <text x="600" y="73" font-size="13" letter-spacing="4" fill="#97c579">NATIVE DESKTOP TELEMETRY</text>
     <text x="600" y="138" font-size="60" font-weight="700" letter-spacing="-2" fill="#e0e6da">Node-Sight</text>
-    <text x="600" y="179" font-size="17" fill="#9ba492">Windows on your desk. Linux over SSH.</text>
-    <text x="600" y="213" font-size="12" letter-spacing="2" fill="#788172">C++17 / WIN32 / GDI / OPENSSH</text>
+    <text x="600" y="179" font-size="17" fill="#9ba492">Native widgets for Windows &amp; Linux.</text>
+    <text x="600" y="213" font-size="12" letter-spacing="2" fill="#788172">C++17 / WIN32 + GTK / OPENSSH</text>
   </g>
 </svg>

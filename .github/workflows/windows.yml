@@ -1,5 +1,5 @@
-# Compile and exercise the read-only Windows adapter without needing a private SSH host.
-name: Windows build
+# Build both native frontends and exercise the shared core without private SSH credentials.
+name: Native builds
 on:
   push:
     branches: [main]
@@ -33,4 +33,33 @@ jobs:
           path: |
             dist/NodeSight.exe
             dist/node-sight-askpass.exe
+          if-no-files-found: error
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install native development dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libgtk-3-dev librsvg2-common xvfb xauth
+      - name: Configure Linux Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Compile
+        run: cmake --build build --parallel 2
+      - name: Test metrics, recording and concurrent SSH fixtures
+        run: ctest --test-dir build --output-on-failure
+      - name: Exercise real GTK windows without a physical screen
+        run: |
+          xvfb-run -a ./build/NodeSight --smoke-test
+          xvfb-run -a ./build/NodeSight --settings-smoke-test
+      - name: Stage Linux client
+        run: cmake --install build --prefix dist
+      - name: Upload Linux build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Node-Sight-linux-x64
+          path: |
+            dist/bin/NodeSight
+            dist/share/applications/node-sight.desktop
           if-no-files-found: error

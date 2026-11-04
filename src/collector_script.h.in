@@ -1,0 +1,3 @@
+// Generated at configure time from the same script embedded by the Windows resource.
+#pragma once
+inline constexpr const char* linuxCollectorScript=R"NODESIGHT(@COLLECTOR_SCRIPT@)NODESIGHT";

@@ -16,7 +16,8 @@ param(
     [ValidateRange(5, 600)][int]$Seconds = 60,
     [int]$AppProcessId = 0,
     [string]$Label = 'default',
-    [string]$OutputPath
+    [string]$OutputPath,
+    [string]$SettingsPath
 )
 $ErrorActionPreference = 'Stop'
 if ($AppProcessId) { $app = Get-Process -Id $AppProcessId }
@@ -52,10 +53,10 @@ for ($i = 0; $i -lt $Seconds; $i++) {
 $clock.Stop()
 # Record only non-sensitive preferences, never serialize the full connection INI.
 $preferences = [ordered]@{}
-$settingsPath = Join-Path $env:LOCALAPPDATA 'NodeSight\settings.ini'
-if (Test-Path -LiteralPath $settingsPath) {
-    foreach ($line in [IO.File]::ReadAllLines($settingsPath)) {
-        if ($line -match '^(interval|size|local|opacity|pinned)=(\d+)$') {
+if (-not $SettingsPath) { $SettingsPath=Join-Path $env:LOCALAPPDATA 'NodeSight\settings.ini' }
+if (Test-Path -LiteralPath $SettingsPath) {
+    foreach ($line in [IO.File]::ReadAllLines($SettingsPath)) {
+        if ($line -match '^(interval|interval_ms|size|local|opacity|pinned|server_count|detail|graphs)=(\d+)$') {
             $preferences[$Matches[1]] = [int]$Matches[2]
         }
     }

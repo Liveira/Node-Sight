@@ -4,14 +4,28 @@
 #include "metrics.h"
 #include <mutex>
 #include <thread>
+#include <deque>
+#include <vector>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <atomic>
+#include <condition_variable>
+#endif
 
 /** Copyable UI-facing state; transport handles never escape the collector. */
 struct RemoteState {
     Metrics metrics; // Includes the last valid values, even after disconnection.
-    std::wstring message = L"Conectando via SSH...";
+    std::wstring message = L"Connecting via SSH...";
     bool connected = false;  // Freshness is checked separately by the UI.
     double lastSample = 0;   // Client monotonic timestamp of the latest valid RV1 line.
     unsigned reconnects = 0; // Number of completed/failed transport attempts.
+};
+
+/** Bounded handoff preserves every received subsecond sample between UI ticks. */
+struct SampleBatch {
+    std::vector<RawSample> samples;
+    unsigned dropped = 0;
 };
 
 /** Owns one worker, one cancellation event and at most one SSH process job. */
@@ -27,13 +41,24 @@ class RemoteCollector {
     void stop();
     /** Copy all visible state under one mutex acquisition. */
     RemoteState snapshot();
+    /** Drain the bounded recording handoff; overflow is reported, never silently hidden. */
+    SampleBatch takeSamples();
 
   private:
     /** Perform connection attempts, pipe parsing and interruptible retry delays. */
     void run(Config config);
     std::mutex mutex_; // Protects state_ and publication/removal of job_.
     RemoteState state_;
-    HANDLE stopEvent_ = nullptr; // Manual-reset cancellation signal.
-    HANDLE job_ = nullptr;       // Borrowed published handle; the worker closes it.
-    std::thread thread_;         // Always joined before this object is destroyed.
+    std::deque<RawSample> samples_;
+    unsigned dropped_ = 0;
+#ifdef _WIN32
+    HANDLE stopEvent_ = nullptr;
+    HANDLE job_ = nullptr;
+#else
+    std::atomic<bool> stopping_{true};
+    std::atomic<int> child_{0};
+    std::condition_variable wake_;
+    std::mutex waitMutex_;
+#endif
+    std::thread thread_; // Always joined before this object is destroyed.
 };

@@ -5,8 +5,8 @@
 101 RCDATA "../collectors/linux.sh"
 // Expose the product identity in Explorer without an installer.
 1 VERSIONINFO
-FILEVERSION 1,0,0,0
-PRODUCTVERSION 1,0,0,0
+FILEVERSION 2,0,0,0
+PRODUCTVERSION 2,0,0,0
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -16,7 +16,7 @@ BEGIN
   BEGIN
    VALUE "FileDescription", "Node-Sight - native desktop monitor\0"
    VALUE "ProductName", "Node-Sight\0"
-   VALUE "FileVersion", "1.0.0\0"
+   VALUE "FileVersion", "2.0.0\0"
   END
  END
  BLOCK "VarFileInfo"

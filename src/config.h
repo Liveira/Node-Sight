@@ -1,35 +1,53 @@
-// Non-secret preferences and encoding helpers shared by the UI and SSH adapter.
+// Portable preferences. Secrets never appear in this model or in the INI file.
 #pragma once
-#include <windows.h>
 #include <string>
+#include <vector>
 
-/** Settings are per Windows user. Passwords are deliberately absent from this structure. */
-struct Config {
-    // Reserved example domain: a fresh checkout never targets a private machine.
+/** A server can stay monitored while hidden or collapsed in the widget. */
+struct ServerProfile {
+    std::wstring id = L"primary", name = L"Primary server";
     std::wstring host = L"server.example.com", user = L"monitor", key;
-    int port = 22;              // TCP port, validated in the range 1..65535.
-    int interval = 2;           // Supported sampling intervals: 1, 2, 5 or 10 seconds.
-    int opacity = 94;           // Percentage applied through the native layered-window alpha.
-    int sizePercent = 100;      // Supported zoom levels: 80, 100 or 125 percent.
-    int x = -32000, y = -32000; // Sentinel means no persisted screen position.
-    bool local = true;          // Whether local-PC sampling and its extra panel are enabled.
-    bool pinned = false;        // Native always-on-top state.
-
-    /** Read preferences, validate values and preserve useful defaults for absent fields. */
-    void load();
-    /** Write preferences without serializing credentials or monitoring histories. */
-    void save() const;
-    /** Derive the Windows Credential Manager target for this SSH destination. */
+    int port = 22;
+    bool enabled = true, visible = true, collapsed = false;
+    /** Credential identity is destination-specific, independent of display aliases. */
     std::wstring credentialTarget() const;
 };
 
-/** Resolve/create %LOCALAPPDATA%\NodeSight and migrate the prototype INI if necessary. */
+/** Shared UI/collection settings; inherited connection fields mirror the selected profile. */
+struct Config : ServerProfile {
+    std::vector<ServerProfile> servers;
+    int selected = 0, intervalMs = 2000, opacity = 94, sizePercent = 100;
+    int x = -32000, y = -32000, detail = 1;
+    bool local = true, pinned = false, graphs = true, localCollapsed = false;
+    bool showCpu = true, showRam = true, showDisk = true, showNetwork = true, showSensors = true,
+         showSwap = true;
+    bool logEnabled = false;
+    int logDurationMinutes = 60, logEveryMs = 1000, logMaxMiB = 10, logKeep = 5;
+    int spikeCpu = 80, spikeRam = 90;
+    std::wstring logDirectory;
+    /** Load schema v2, migrating a single-server v1 profile without losing connection data. */
+    std::wstring sourcePath; // Optional isolated config path for tests and portable instances.
+    void load(const std::wstring& path = L"");
+    /** Atomically replace only the non-secret settings file. */
+    bool save(const std::wstring& path = L"") const;
+    /** Mirror the selected profile into the compatibility connection fields. */
+    void syncSelected();
+    /** Produce an independent connection copy for one collector worker. */
+    Config forServer(size_t index) const;
+};
+
+/** Resolve/create the per-user settings directory on Windows or XDG Linux. */
 std::wstring configDirectory();
-/** Return the absolute executable directory used to find the sibling askpass helper. */
+/** Resolve the executable's actual directory, not the working directory. */
 std::wstring executableDirectory();
-/** Decode SSH UTF-8 diagnostics for display in UTF-16 Win32 controls. */
+/** UTF-8 is used on disk; Win32 widgets and shared labels use wide strings. */
 std::wstring utf8ToWide(const std::string& text);
-/** Encode UTF-16 as a UTF-8 payload without a terminator. */
 std::string wideToUtf8(const std::wstring& text);
-/** Check destination characters, port bounds and key-path control characters. */
-bool validConnection(const Config& config);
+/** Validate destination characters before creating an argv/command line. */
+bool validConnection(const ServerProfile& config);
+/** Strict allowlist shared by settings, persistence and the Linux shell collector. */
+bool validInterval(int milliseconds);
+/** Locale-independent decimal seconds for GNU/BusyBox sleep. */
+std::string intervalArgument(int milliseconds);
+/** Opaque local profile identifier; it contains no destination information. */
+std::wstring newProfileId();

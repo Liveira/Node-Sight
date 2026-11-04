@@ -1,0 +1,10 @@
+# Desktop entry for Linux application menus. Autostart is an explicit user choice.
+[Desktop Entry]
+Type=Application
+Name=Node-Sight
+Comment=Native multi-server system resource widget
+Exec=NodeSight
+Icon=utilities-system-monitor
+Terminal=false
+Categories=System;Monitor;
+StartupNotify=false

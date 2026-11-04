@@ -1,0 +1,16 @@
+#!/bin/sh
+# Transport fixture only. Production always uses the real system OpenSSH executable.
+# Consume the embedded script so the parent's stdin/EOF behavior is exercised too.
+cat >/dev/null
+total=1000
+idle=700
+rx=1000
+tx=500
+while :; do
+    total=$((total + 100))
+    idle=$((idle + 70))
+    rx=$((rx + 1024))
+    tx=$((tx + 512))
+    printf 'RV1 %s %s 8000 2000 2000 1000 100000 20000 %s %s 200.0 0.30 45.2\n' "$total" "$idle" "$rx" "$tx"
+    sleep 0.1 || exit
+done

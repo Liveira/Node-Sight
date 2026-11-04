@@ -40,6 +40,14 @@ int main() {
     check(m.ratesValid && std::abs(m.cpu - 25) < 0.001 && m.rxRate == 2000 && m.txRate == 1000,
           "CPU delta and network bytes/sec");
     check(m.ram == 75 && m.disk == 20, "RAM excludes available cache and disk uses occupied bytes");
+    // A reconnect must not derive rates across a missing-data gap, even if host counters keep increasing.
+    s.session = 1;
+    s.total += 100;
+    s.idle += 50;
+    s.time += 1;
+    s.uptime += 1;
+    m.update(s);
+    check(!m.ratesValid && m.cpuHistory.count == 0, "transport generation resets interval math");
     // Simulate reboot/rollback; no unsigned spike may enter history.
     s.total = 5;
     s.idle = 3;

@@ -3,7 +3,7 @@
 export LC_ALL=C
 # Restrict sampling intervals to values supported by the desktop app.
 interval=${1:-2}
-case "$interval" in 1|2|5|10) ;; *) interval=2 ;; esac
+case "$interval" in 0.1|0.25|0.5|1|2|5|10) ;; *) interval=2 ;; esac
 # Prefer the default route to avoid counting bridge traffic twice.
 iface=$(awk '$2 == "00000000" { print $1; exit }' /proc/net/route)
 thermal=""
@@ -19,10 +19,10 @@ done
 disk="0 0"
 tick=0
 while :; do
-    # Cache df for fifteen samples; all other inputs are inexpensive virtual files.
+    # Cache df for about thirty seconds, independently of the requested sample interval.
     if [ "$tick" -eq 0 ]; then
         disk=$(df -Pk / 2>/dev/null | awk 'NR==2 {print $2, $3}')
-        tick=15
+        tick=$(awk -v seconds="$interval" 'BEGIN { n=int(30/seconds); print n<1?1:n }')
     fi
     # Explicit file inputs prevent consuming the SSH script stream on stdin.
     awk -v disk="$disk" -v iface="$iface" -v thermal="$thermal" '
