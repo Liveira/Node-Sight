@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/header.svg" alt="Node-Sight — native desktop telemetry" width="100%"></p>
+# Node-Sight
 
 <p align="center">
   <img src="https://img.shields.io/badge/C%2B%2B-17-97c579?style=flat-square" alt="C++17">
